@@ -12,3 +12,4 @@ serde_json = "1.0.108"
 walkdir = "2.4.0"
 warc = { version = "0.3.1", features = ["gzip"] }
 zstd = "0.13.0"
+rayon = "1.8"

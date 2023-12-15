@@ -1,8 +1,10 @@
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{
     env,
     fs::{self},
     io::{BufRead, BufReader},
+    path::Path,
 };
 
 use walkdir::{DirEntry, WalkDir};
@@ -19,10 +21,11 @@ struct HpltJson {
     collection: String,
 }
 
-fn main() -> Result<(), std::io::Error> {
+fn main() {
     let args: Vec<String> = env::args().collect();
 
     let folder = &args[1];
+    let dst = &args[2];
     let file_paths: Vec<DirEntry> = WalkDir::new(folder)
         .into_iter()
         .filter_map(Result::ok)
@@ -30,25 +33,23 @@ fn main() -> Result<(), std::io::Error> {
         .filter(|e| e.file_name().to_str().unwrap().ends_with(".zst"))
         .collect();
 
-    for file in file_paths {
+    file_paths.into_par_iter().for_each(|file| {
+        let path = file.path();
+        let file_stem = path.file_stem().unwrap();
+        let file_name = Path::new(file_stem).file_stem().unwrap().to_str().unwrap();
         let decoder = {
-            let file = fs::File::open(file.path()).unwrap();
+            let file = fs::File::open(path).unwrap();
             zstd::Decoder::new(file).unwrap()
         };
         let reader = BufReader::new(decoder);
         let encoder = {
-            let file = fs::File::create("hplt.wet.zst").unwrap();
+            let file = fs::File::create(format!("{}/{}.{}", dst, file_name, "wet.zst")).unwrap();
             zstd::Encoder::new(file, 0).unwrap()
         };
         let mut warc_file = WarcWriter::new(encoder.auto_finish());
 
-        // let mut line_count = 0;
         for line in reader.lines() {
             let doc: HpltJson = serde_json::from_str(&line.unwrap()).unwrap();
-            // if line_count == 100000 {
-            //     println!("100000 lines written");
-            //     break;
-            // }
             let builder = RecordBuilder::default()
                 .body(doc.text.into_bytes())
                 .version("1.0".to_owned())
@@ -58,9 +59,7 @@ fn main() -> Result<(), std::io::Error> {
 
             let record = builder.build().unwrap();
 
-            warc_file.write(&record)?;
-            // line_count += 1;
+            warc_file.write(&record).expect("Falied to write record");
         }
-    }
-    Ok(())
+    });
 }
